@@ -19,3 +19,7 @@
 - GCC 15.3.0；`"${CROSS_COMPILE}gcc" -dumpmachine` 输出 `aarch64-buildroot-linux-gnu`。
 - `images/rootfs.ext2` 为 256 MiB；Buildroot 已生成 `rootfs.ext4 -> rootfs.ext2`，`readlink -f` 指向本次输出目录中的镜像。
 - rootfs 的 QEMU 启动、内核、U-Boot 和后续章节尚未验证。
+
+### 恢复检查
+
+检查已有源码标签、配置、构建日志与产物后，以 `JOBS=2; . ./env.sh; make -C "$BR_SRC" O="$BR_OUT" -j"$JOBS" BR2_WGET='/tmp/opencode/buildroot-curl-wget'` 再次增量构建，成功退出；追加日志位于 `out/buildroot-build.log`。本次未发生新的下载错误。重新逐项断言上述配置、禁用集成选项和工具链三元组；使用 `stat -L` 验证镜像为 268435456 字节，并用 `file -L` 确认 ext4。重新构建可能重生成 rootfs 镜像，启动仍未验证。
