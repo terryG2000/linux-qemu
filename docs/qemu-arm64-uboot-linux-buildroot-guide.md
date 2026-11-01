@@ -178,6 +178,8 @@ EOF
 
 已在官方 Buildroot 2026.08.1 源码上，使用本文的精确 defconfig 实际运行 `make defconfig` 和 `make olddefconfig`：确认 ARM64 Cortex-A53、glibc、6.18.55 headers、`ttyAMA0`、256 MiB ext4，以及未集成 kernel/U-Boot/host QEMU。此检查只验证配置生成，不代表工具链、rootfs 或新版本组合已完整编译、启动验收；本地构建时仍需检查最终 `.config`。
 
+本仓库的一次第 5 章实测已完成工具链和 rootfs 构建；具体环境、下载问题及验收见 [构建排查记录](qemu-build-troubleshooting.md)。这不代表后续内核、U-Boot 或启动链已验收。
+
 生成 Buildroot 输出配置并编译：
 
 ```bash
