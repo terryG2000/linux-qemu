@@ -51,6 +51,13 @@ make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" \
 
 以上路径和库版本是本机临时解决方案；其他系统应根据实际安装的开发包及运行时库调整。临时目录不是持久依赖，今后重建宿主工具需重新提供开发文件。
 
+持久解决方案：
+```shell
+sudo apt update
+sudo apt install libgnutls28-dev
+```
+
+
 ### 验收
 
 - `make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" savedefconfig` 成功，复制到 `configs/u-boot_defconfig` 并用 `cmp` 确认一致；完整配置为 `CONFIG_ARM64=y`、`CONFIG_TARGET_QEMU_ARM_64BIT=y`、`CONFIG_TOOLS_MKEFICAPSULE=y`。

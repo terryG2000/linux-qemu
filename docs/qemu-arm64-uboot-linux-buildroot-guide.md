@@ -197,6 +197,22 @@ else
 fi
 ```
 
+**这两条配置命令的区别：**可以把 `.config` 看成一张完整的配置表。
+
+- 第一条 `make ... BR2_DEFCONFIG=... defconfig` 读取 `configs/buildroot_defconfig` 中保存的精简配置，结合当前 Buildroot 版本的默认值，生成 `$BR_OUT/.config`。其中 `-C "$BR_SRC"` 指定 Buildroot 源码目录，`O="$BR_OUT"` 指定配置和构建产物所在的输出目录。
+- 第二条 `make ... olddefconfig` 读取输出目录中**已有的** `.config`，对照当前 Buildroot 版本的配置规则更新：尽量保留仍有效的选择，缺少的新选项使用默认值，不再有效的选项可能被调整。它特别适合升级 Buildroot 后迁移旧配置，迁移后仍需检查结果。
+
+第一次执行时，`defconfig` 通常已经生成符合当前版本规则的完整 `.config`；紧接着执行 `olddefconfig` 只是再检查一次，通常不是必需步骤。**这两条命令都不编译工具链或 rootfs**；上面最后的 `make ... -j"$JOBS"` 才开始构建。注意，重新运行 `defconfig` 会重置输出目录中的 `.config`，可能覆盖尚未保存的配置修改。
+
+两条命令主要读写的是同一个输出文件，而不是各自生成一份配置：
+
+| 命令 | 读取 | 主要输出 |
+|---|---|---|
+| `defconfig` | `configs/buildroot_defconfig` 精简配置和 Buildroot 配置规则 | 生成或覆盖 `$BR_OUT/.config` 完整配置 |
+| `olddefconfig` | `$BR_OUT/.config` 现有配置和当前 Buildroot 配置规则 | 更新同一个 `$BR_OUT/.config` 文件 |
+
+以当前版本为例，完整配置的实际路径是 `out/buildroot-2026.08.1/.config`。配置过程中还可能在输出目录生成用于后续构建的辅助 `Makefile` 和 Kconfig 工具等文件；这些不是工具链或 rootfs。可以使用 `less "$BR_OUT/.config"` 查看完整配置。
+
 编译完成后检查工具链和 rootfs：
 
 ```bash
@@ -235,6 +251,8 @@ make -C "$BR_SRC" O="$BR_OUT" -j"$JOBS"
 
 U-Boot 的 `ARCH=arm` 构建目录同时覆盖 AArch32 与 AArch64 目标；本例的 `qemu_arm64_defconfig` 生成的是 64 位 ARM U-Boot，不代表存在 32 位启动阶段。交叉工具链目标仍是 aarch64：
 
+`qemu_arm64_defconfig` 是 U-Boot 源码自带的 make 配置目标，对应文件 `$UBOOT_SRC/configs/qemu_arm64_defconfig`。执行该目标会结合当前源码版本的默认值生成完整配置 `$UBOOT_OUT/.config`；随后编译使用该 `.config`。
+
 ```bash
 . ./env.sh
 make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
@@ -252,6 +270,26 @@ cp "$UBOOT_OUT/defconfig" "$PROJECT_ROOT/configs/u-boot_defconfig"
 ls -lh "$UBOOT_OUT/u-boot.bin" "$UBOOT_OUT/u-boot"
 ```
 
+`savedefconfig` 从当前完整 `.config` 生成精简配置 `$UBOOT_OUT/defconfig`；上面的 `cp` 将它保存为项目中的 `configs/u-boot_defconfig`，便于保存自定义选项和版本迁移。如果没有修改上游配置，保存它并非构建所必需。再次保存会覆盖项目中的同名文件，请先检查是否有需要保留的修改。
+
+**以后使用项目保存的配置构建**：`configs/u-boot_defconfig` 是项目文件，不是 U-Boot 源码自带的 make 目标；不能直接将其绝对路径放在 `make` 命令末尾当作目标。对全新的输出目录，可以将它作为初始 `.config`，再运行 `olddefconfig` 补全当前 U-Boot 版本的默认值：
+
+```bash
+. ./env.sh
+# 仅当输出目录不存在时创建；已有目录请先备份并自行决定如何处理。
+if [[ -e "$UBOOT_OUT" || -L "$UBOOT_OUT" ]]; then
+  echo "输出路径已存在，未修改：$UBOOT_OUT" >&2
+elif mkdir "$UBOOT_OUT"; then
+  cp "$PROJECT_ROOT/configs/u-boot_defconfig" "$UBOOT_OUT/.config" &&
+    make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
+      ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" olddefconfig &&
+    make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
+      ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" -j"$JOBS"
+fi
+```
+
+上例要求 `$UBOOT_OUT` 的父目录已经存在。同版本重建时，若输出目录和 `.config` 已存在且不需要重置，通常直接执行最后的编译命令即可。跨版本使用精简配置时，默认值和依赖可能改变，应检查生成的 `.config`；详细迁移步骤见第 12 章。
+
 `u-boot.bin` 是启动用原始镜像，`u-boot` 是 ELF 符号文件。调试时不要把 `.bin` 当成带符号的 ELF。
 
 本仓库第 6 章实测完成编译和 ELF/配置检查；宿主机缺少 GnuTLS 开发文件时的无 sudo 增量构建方法及具体验收见 [构建排查记录](qemu-build-troubleshooting.md)。这不代表 QEMU 启动已验证。
@@ -259,6 +297,21 @@ ls -lh "$UBOOT_OUT/u-boot.bin" "$UBOOT_OUT/u-boot"
 ## 7. 配置并构建 Linux
 
 先由上游 ARM64 默认配置开始，再显式确保虚拟机启动和调试所需驱动内建（`=y`，不是模块）。不启用模块可避免当前教学流程还需安装匹配模块。配置文件位于独立的 `LINUX_OUT`，不会污染源码树。
+
+以下命令只准备内核配置，**还没有开始编译内核**。流程为：
+
+```text
+Linux 自带的 ARM64 默认配置
+          │ make defconfig
+          ▼
+输出目录中的完整配置 .config
+          │ scripts/config 按需修改
+          ▼
+请求启用 QEMU 启动和 GDB 调试所需选项
+          │ make olddefconfig 按依赖规则更新
+          ▼
+检查最终 .config，再编译
+```
 
 ```bash
 . ./env.sh
@@ -288,6 +341,33 @@ make -C "$LINUX_SRC" O="$LINUX_OUT" \
 make -C "$LINUX_SRC" O="$LINUX_OUT" \
   ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
 ```
+
+### 配置命令说明
+
+**`defconfig` 生成默认配置。** `make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" defconfig` 读取源码自带的 `$LINUX_SRC/arch/arm64/configs/defconfig`，结合当前内核的配置规则生成 `$LINUX_OUT/.config`，本例即 `out/linux-v6.18.60/.config`。
+
+- `-C "$LINUX_SRC"`：使用 Linux 源码目录中的 Makefile。
+- `O="$LINUX_OUT"`：将配置和构建产物放在独立输出目录。
+- `ARCH=arm64`：选择 ARM64 架构；`CROSS_COMPILE` 指定交叉工具链前缀。
+- `defconfig`：根据该架构的默认配置生成完整 `.config`。
+
+重新运行 `defconfig` 会重新生成 `.config`，可能覆盖之前尚未保存的配置修改。
+
+**`scripts/config` 修改配置。** 它是 Linux 源码自带的工具，`--file "$LINUX_OUT/.config"` 指定要修改的文件；`--enable CONFIG_XXX` 请求启用选项，`--disable CONFIG_XXX` 请求关闭选项。上面的选项按用途分为：
+
+| 用途 | 配置项 | 作用 |
+|---|---|---|
+| 虚拟设备 | `VIRTIO`、`VIRTIO_MMIO`、`VIRTIO_BLK`、`VIRTIO_NET` | 提供 virtio 基础、MMIO、虚拟磁盘和网络支持；虚拟磁盘提供根文件系统所在的 `/dev/vda`。 |
+| 文件系统与设备 | `EXT4_FS`、`DEVTMPFS`、`DEVTMPFS_MOUNT` | 支持 ext4，提供内核管理的设备文件系统并在适用时自动挂载 `/dev`。 |
+| 串口 | `SERIAL_AMBA_PL011`、`SERIAL_AMBA_PL011_CONSOLE` | 支持 QEMU `virt` 的 PL011 串口及控制台；配合 `console=ttyAMA0` 显示日志并操作系统。 |
+| 模块 | 关闭 `MODULES` | 不使用内核模块；本指南所需驱动配置为内建，避免额外安装模块。 |
+| 调试格式 | 关闭 `DEBUG_INFO_NONE` 和 `DEBUG_INFO_REDUCED`；启用 `DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT` | 使用工具链默认的 DWARF 调试信息，不选择无调试信息或精简信息。 |
+| 调试压缩 | 启用 `DEBUG_INFO_COMPRESSED_NONE`；关闭 `DEBUG_INFO_COMPRESSED_ZLIB` 和 `DEBUG_INFO_COMPRESSED_ZSTD` | 请求不压缩调试信息。 |
+| GDB 和调用栈 | `GDB_SCRIPTS`、`FRAME_POINTER` | 启用内核 GDB 辅助脚本支持和帧指针，便于调试与分析调用栈。 |
+
+表中选项名称均带 `CONFIG_` 前缀。实际能否启用取决于架构、版本和 Kconfig 依赖。
+
+**`olddefconfig` 更新已有配置。** `scripts/config` 直接修改 `.config`，但写入不保证最终生效；`olddefconfig` 按当前内核配置规则处理依赖并为缺少的选项使用默认值。处理完成后，仍须检查关键选项是否真正为 `y`。这一步也不编译内核；后面的 `make ... Image vmlinux scripts_gdb` 才开始构建。
 
 检查关键配置实际存在且为内建：
 
@@ -325,6 +405,8 @@ file "$LINUX_OUT/arch/arm64/boot/Image" "$LINUX_OUT/vmlinux"
 
 ## 8. 直接启动 Linux：先验证 rootfs
 
+本节启动链为 `QEMU → Linux → rootfs`，不经过 U-Boot。**直接启动也需要设备树**：使用 `virt` 机器和 `-kernel` 时，QEMU 根据虚拟硬件配置生成设备树，将它放入来宾内存，并按 ARM64 启动约定将地址传给 Linux。因此无需手动指定 DTB，并不是 Linux 不需要它。
+
 在终端加载环境并启动：
 
 ```bash
@@ -347,6 +429,17 @@ qemu-system-aarch64 \
 
 ## 9. 使用 U-Boot 启动 Linux
 
+本节启动链变为 `QEMU → U-Boot → Linux → rootfs`。QEMU 先运行 U-Boot，并将 Linux 内核和设备树放入内存；随后由 U-Boot 将设备树地址传给 Linux 并启动内核。四个主要文件如下：
+
+| 文件 | 作用 |
+|---|---|
+| `u-boot.bin` | QEMU 首先运行的 U-Boot 固件 |
+| `Image` | 由 U-Boot 启动的 ARM64 Linux 内核镜像 |
+| `virt.dtb` | 告诉 Linux 内存、串口和虚拟设备等信息的二进制设备树 |
+| `rootfs.ext4` | 接入为虚拟磁盘、由 Linux 挂载的根文件系统 |
+
+和第 8 章不同，本节选择手动导出并加载 DTB，再通过 U-Boot 的 `booti` 传入；这是本指南采用的方式，不代表所有 U-Boot 方案都必须手动生成 DTB。其他方案也可以从存储设备加载或使用平台提供的设备树。
+
 QEMU `virt` 机器的设备树应与实际启动时拓扑一致。先使用与正式启动相同的 CPU、内存和设备参数生成 DTB；`dumpdtb` 阶段不要加 GDB 的 `-S`/`-gdb` 参数。QEMU 会生成 DTB 并退出：
 
 ```bash
@@ -362,6 +455,8 @@ qemu-system-aarch64 \
 test -s "$RUN_DIR/virt.dtb"
 dtc -I dtb -O dts "$RUN_DIR/virt.dtb" -o "$RUN_DIR/virt.dts"
 ```
+
+设备树可以理解为虚拟硬件的说明书。`dumpdtb` 根据当前虚拟机配置生成 `$RUN_DIR/virt.dtb`；`test -s` 检查文件非空；`dtc` 将它转换为供人阅读和排查的 `virt.dts`。正式启动使用的是二进制 `virt.dtb`，不是文本 `virt.dts`。生成设备树的这次 QEMU 执行不会启动 Linux。
 
 QEMU virt 的 RAM 范围是 `[0x40000000, 0x80000000)`。U-Boot v2026.10 的 `qemu_arm64_defconfig` 初始化栈和默认 load 地址在 `0x40200000`，因此**不能**把内核 loader 放到该地址。统一将 Linux Image 放在 `0x48000000`，DTB 放在 `0x4f000000`；确保 Image 小于 112 MiB，避免与 DTB 地址重叠。U-Boot 会自行搬迁；不要硬编码 `fdtcontroladdr` 来替代传给 `booti` 的来宾 DTB。
 
@@ -380,12 +475,16 @@ qemu-system-aarch64 \
   -nographic -snapshot
 ```
 
+本次命令中，`-bios` 启动 U-Boot；两个 `-device loader` 分别把 Image 和 DTB 放到指定的来宾内存地址，**仅加载而不直接执行 Linux**。`-drive` 和 `virtio-blk-device` 将 rootfs 文件接入为虚拟磁盘，不是将整个 rootfs 预加载到这些内存地址。`-nographic` 使用当前终端作为控制台；`-snapshot` 不将来宾写入保存到原始 rootfs 镜像。
+
 看到 `Hit any key to stop autoboot` 时立即按任意键，等待 `=>` 提示符，再输入：
 
 ```text
 setenv bootargs 'console=ttyAMA0 root=/dev/vda rw rootwait nokaslr'
 booti 0x48000000 - 0x4f000000
 ```
+
+按键是为了中断 U-Boot 自动启动，出现 `=>` 时 Linux 还未启动。`setenv` 将启动参数保存到 U-Boot 的 `bootargs`，供启动 Linux 时传入：`console=ttyAMA0` 使用串口控制台；`root=/dev/vda` 选择 virtio 根磁盘；`rw` 以可读写方式挂载；`rootwait` 等待磁盘就绪；`nokaslr` 关闭内核地址随机化，方便调试。`rw` 不会改变 `-snapshot` 对原镜像的保护。`booti` 执行后，正常情况下会看到 `Starting kernel ...`，随后出现 Linux 登录提示，可用 `root` 登录。
 
 `booti` 参数依次是未压缩 ARM64 `Image` 地址、可选 initrd（此处无，写 `-`）、设备树地址。`-device loader` 仅加载文件；不要给这些 loader 设备添加 `cpu-num`，因为那会设置 CPU 程序计数器，可能直接跳过 U-Boot。DTB 必须在 QEMU 设备拓扑变化后重新生成。dumpdtb 与正式启动均使用相同的 `-bios u-boot.bin` 和设备参数；虽然 QEMU 官方说明 firmware 树与 dumpdtb 的生成不必相同，本指南为减少变量仍保持一致。此前使用 QEMU 8.2.2 通过 QMP 验证了相同 CPU/RAM/virtio 网络与块设备参数下的 `dumpdtb`（含 `-bios`）、RAM/PL011 设备树信息、loader 地址组合及 GDB 绑定参数可启动并退出；**这只是 QEMU 参数级检查，不是本次 Buildroot/Linux/U-Boot 新版本的端到端启动验证**。使用与直接启动相同的 rootfs 和控制台参数，便于比较问题是在 U-Boot 前还是 Linux/rootfs 阶段出现。
 
