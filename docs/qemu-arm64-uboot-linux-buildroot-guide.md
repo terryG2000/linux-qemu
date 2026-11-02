@@ -343,6 +343,8 @@ qemu-system-aarch64 \
 
 `-snapshot` 使本次运行的写入不落入 rootfs 原镜像，适合反复试验。要持久保存来宾写入，移除 `-snapshot`；退出后原镜像会被修改。不要让多个 QEMU 进程同时以可写方式打开同一 rootfs。重新构建 Buildroot 可能覆盖镜像，若已保存来宾数据，先停机并备份该镜像，或用独立副本作为日常运行盘。
 
+本仓库实测 TCG 启动并以 root 登录：`uname -r` 输出 `6.18.60`，`mount` 显示 `/dev/root on / type ext4 (rw,relatime)`，启动日志明确显示 `EXT4-fs (vda): mounted filesystem ... r/w`；`id` 为 `uid=0(root)`，`poweroff` 后显示 `reboot: Power down`。本次快照运行前后 rootfs SHA-256 一致（`b151b87fc647315b6dabd6dc8167af5b29367f4ce48bf10d2e5ffaade0d61b1d`）；完整串口日志保存在本机 `/tmp/opencode/ch8-console.log`，未提交。
+
 ## 9. 使用 U-Boot 启动 Linux
 
 QEMU `virt` 机器的设备树应与实际启动时拓扑一致。先使用与正式启动相同的 CPU、内存和设备参数生成 DTB；`dumpdtb` 阶段不要加 GDB 的 `-S`/`-gdb` 参数。QEMU 会生成 DTB 并退出：
