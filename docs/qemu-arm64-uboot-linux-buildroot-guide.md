@@ -358,7 +358,7 @@ qemu-system-aarch64 \
   -drive if=none,file="$BR_OUT/images/rootfs.ext4",format=raw,id=rootfs \
   -device virtio-blk-device,drive=rootfs \
   -netdev user,id=net0 -device virtio-net-device,netdev=net0 \
-  -nographic
+  -nographic -snapshot
 test -s "$RUN_DIR/virt.dtb"
 dtc -I dtb -O dts "$RUN_DIR/virt.dtb" -o "$RUN_DIR/virt.dts"
 ```
@@ -380,7 +380,7 @@ qemu-system-aarch64 \
   -nographic -snapshot
 ```
 
-在 U-Boot 提示符输入：
+看到 `Hit any key to stop autoboot` 时立即按任意键，等待 `=>` 提示符，再输入：
 
 ```text
 setenv bootargs 'console=ttyAMA0 root=/dev/vda rw rootwait nokaslr'
@@ -388,6 +388,8 @@ booti 0x48000000 - 0x4f000000
 ```
 
 `booti` 参数依次是未压缩 ARM64 `Image` 地址、可选 initrd（此处无，写 `-`）、设备树地址。`-device loader` 仅加载文件；不要给这些 loader 设备添加 `cpu-num`，因为那会设置 CPU 程序计数器，可能直接跳过 U-Boot。DTB 必须在 QEMU 设备拓扑变化后重新生成。dumpdtb 与正式启动均使用相同的 `-bios u-boot.bin` 和设备参数；虽然 QEMU 官方说明 firmware 树与 dumpdtb 的生成不必相同，本指南为减少变量仍保持一致。此前使用 QEMU 8.2.2 通过 QMP 验证了相同 CPU/RAM/virtio 网络与块设备参数下的 `dumpdtb`（含 `-bios`）、RAM/PL011 设备树信息、loader 地址组合及 GDB 绑定参数可启动并退出；**这只是 QEMU 参数级检查，不是本次 Buildroot/Linux/U-Boot 新版本的端到端启动验证**。使用与直接启动相同的 rootfs 和控制台参数，便于比较问题是在 U-Boot 前还是 Linux/rootfs 阶段出现。
+
+本仓库实际端到端启动观察到 `U-Boot 2026.10`、`Starting kernel ...`、`psci: PSCIv1.1 detected in firmware.`、`EXT4-fs (vda): mounted filesystem ... r/w`；root 登录后 `uname -r` 为 `6.18.60`、`mount` 显示 `/dev/root on / type ext4 (rw,relatime)`、`id` 为 `uid=0(root)`，`poweroff` 正常结束。完整串口日志保存在本机 `/tmp/opencode/ch9-console.log`，未提交。
 
 ## 10. 日常启动脚本（可选）
 
