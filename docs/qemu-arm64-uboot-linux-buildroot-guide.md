@@ -23,7 +23,7 @@
 sudo apt update
 sudo apt install -y \
   bc bison build-essential ca-certificates cpio device-tree-compiler \
-  file flex gdb-multiarch git libelf-dev libncurses-dev libssl-dev make \
+  file flex gdb-multiarch git libelf-dev libgnutls28-dev libncurses-dev libssl-dev make \
   pkg-config python3 python3-venv rsync unzip wget xz-utils \
   curl \
   qemu-system-arm
@@ -320,6 +320,8 @@ file "$LINUX_OUT/arch/arm64/boot/Image" "$LINUX_OUT/vmlinux"
 ```
 
 `Image` 用于 QEMU 启动，不含可用于源代码级调试的完整符号；`vmlinux` 是 GDB 使用的带符号 ELF。`scripts_gdb` 目标生成/更新 `vmlinux-gdb.py` 等 GDB 辅助脚本。每次配置修改后都应重新检查 `.config`，必要时重新构建。
+
+本仓库已实际完成第 7 章编译并验证关键内建选项、Image 和带调试信息的 vmlinux；尚需继续验证启动。编译中断后的增量恢复情况见[构建排查记录](qemu-build-troubleshooting.md)。
 
 ## 8. 直接启动 Linux：先验证 rootfs
 

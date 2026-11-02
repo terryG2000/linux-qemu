@@ -57,3 +57,17 @@ make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" \
 - 交叉 GCC 15.3.0，`-dumpmachine` 为 `aarch64-buildroot-linux-gnu`。`file` 和交叉 `readelf -h` 确认 `u-boot` 是 ELF64 AArch64；`readelf -S` 确认 `.debug_info` 和 `.symtab`，且 `file` 显示未 strip。`readelf -S` 同时提示 section 6 的 link 字段警告，未影响上述检查。
 - `test -s "$UBOOT_OUT/u-boot.bin"` 通过，大小 1501904 字节；ELF 为 10846952 字节。`file` 将原始 bin 误识别为 PCX，不能据此判断其格式。
 - 尚未验证 U-Boot 在 QEMU 启动或与 Linux/rootfs 联合启动。
+
+## 第 7 章：Linux v6.18.60
+
+源码提交 `f45ed76d6791cf72ff1265ee93511175bbbc2f18`。按照指南使用 Buildroot 的 aarch64 工具链在独立 `out/linux-v6.18.60` 执行 arm64 `defconfig`、`scripts/config` 和 `olddefconfig`，然后以 `make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" -j2 Image vmlinux scripts_gdb` 构建并执行 `savedefconfig`。
+
+### 实际问题与处理
+
+第一次构建在命令执行的 3600 秒时限结束后被中断；这不是已确认的编译错误。保留输出目录，以同一命令增量重试后成功，未重置配置或删除中间文件。配置、首次构建和重试日志分别保存在 `/tmp/opencode/linux-config.log`、`/tmp/opencode/linux-build.log`、`/tmp/opencode/linux-build-retry.log`（临时日志可能随环境清理）。
+
+### 验收
+
+- 已逐项检查 virtio、virtio-mmio、virtio-blk、virtio-net、ext4、devtmpfs 和 PL011 串口为内建，模块禁用；调试符号和 GDB 脚本已启用。
+- ARM64 `Image` 约 76 MiB；`vmlinux` 是包含 debug_info 且未剥离的 AArch64 ELF；`vmlinux-gdb.py` 与 `defconfig` 已生成。
+- 已保存 `configs/linux_defconfig`；尚未验证 QEMU 启动或 GDB 断点。
