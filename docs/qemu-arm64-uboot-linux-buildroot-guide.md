@@ -545,11 +545,17 @@ git -C "$UBOOT_SRC" status --short --branch
 . ./env.sh
 OLD_LINUX_VERSION="$LINUX_VERSION"
 OLD_LINUX_OUT="$LINUX_OUT"
-cp "$OLD_LINUX_OUT/.config" "$RUN_DIR/linux-${OLD_LINUX_VERSION}-full.config"
-read -r -p '已发布的 Linux stable tag（例如 v6.x.y）: ' NEW_LINUX_VERSION
-if [[ -z "$NEW_LINUX_VERSION" || "$NEW_LINUX_VERSION" == "$OLD_LINUX_VERSION" ]]; then
+OLD_LINUX_CONFIG=""
+if ! OLD_LINUX_CONFIG=$(mktemp "$RUN_DIR/linux-${OLD_LINUX_VERSION}-full.config.XXXXXXXX"); then
+  printf '无法创建 Linux 配置备份，未执行 checkout。\n' >&2
+elif ! cp -- "$OLD_LINUX_OUT/.config" "$OLD_LINUX_CONFIG"; then
+  printf 'Linux 配置备份失败（保留 %s），未执行 checkout。\n' "$OLD_LINUX_CONFIG" >&2
+elif ! read -r -p '已发布的 Linux stable tag（例如 v6.x.y）: ' NEW_LINUX_VERSION; then
+  printf '读取 tag 失败，未执行 checkout；备份：%s\n' "$OLD_LINUX_CONFIG" >&2
+elif [[ -z "$NEW_LINUX_VERSION" || "$NEW_LINUX_VERSION" == "$OLD_LINUX_VERSION" ]]; then
   printf 'tag 为空或与当前版本相同，停止升级。\n' >&2
 elif git -C "$LINUX_SRC" ls-remote --exit-code --tags origin "refs/tags/$NEW_LINUX_VERSION" >/dev/null; then
+  printf '配置备份：%s\n' "$OLD_LINUX_CONFIG"
   git -C "$LINUX_SRC" fetch --depth=1 origin tag "$NEW_LINUX_VERSION" &&
     git -C "$LINUX_SRC" switch --detach "$NEW_LINUX_VERSION" &&
     git -C "$LINUX_SRC" rev-parse HEAD
@@ -558,7 +564,7 @@ else
 fi
 ```
 
-只有确认 tag 检查、fetch 和 checkout 成功后才继续。编辑 `env.sh`，将 `LINUX_VERSION` 改成同一个 `$NEW_LINUX_VERSION` 的实际值，然后在当前终端重新加载：
+备份路径保存在 `OLD_LINUX_CONFIG`（可用 `printf '%s\n' "$OLD_LINUX_CONFIG"` 查看）；即使 tag 被拒绝也保留备份。只有确认备份、tag 检查、fetch 和 checkout 成功后才继续。编辑 `env.sh`，将 `LINUX_VERSION` 改成同一个 `$NEW_LINUX_VERSION` 的实际值，然后在当前终端重新加载：
 
 ```bash
 . ./env.sh
@@ -569,15 +575,22 @@ test "$LINUX_OUT" != "$OLD_LINUX_OUT"
 新输出目录按 `out/linux-$NEW_LINUX_VERSION` 命名。复制旧完整配置，先查看新版本配置项，再迁移并审核差异：
 
 ```bash
-mkdir -p "$LINUX_OUT"
-cp "$OLD_LINUX_OUT/.config" "$LINUX_OUT/.config"
-make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" listnewconfig
-make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
-"$LINUX_SRC/scripts/diffconfig" "$OLD_LINUX_OUT/.config" "$LINUX_OUT/.config"
-grep -E 'CONFIG_(VIRTIO|VIRTIO_MMIO|VIRTIO_BLK|VIRTIO_NET|EXT4_FS|DEVTMPFS|DEVTMPFS_MOUNT|SERIAL_AMBA_PL011|SERIAL_AMBA_PL011_CONSOLE|DEBUG_INFO|GDB_SCRIPTS)=' "$LINUX_OUT/.config"
+if [[ -e "$LINUX_OUT" || -L "$LINUX_OUT" ]]; then
+  printf '输出路径已存在，不覆盖：%s\n' "$LINUX_OUT" >&2
+elif [[ ! -d "$(dirname -- "$LINUX_OUT")" ]]; then
+  printf '输出父目录不存在：%s\n' "$LINUX_OUT" >&2
+elif mkdir -- "$LINUX_OUT" &&
+  cp -- "$OLD_LINUX_CONFIG" "$LINUX_OUT/.config" &&
+  make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" listnewconfig &&
+  make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" olddefconfig; then
+  "$LINUX_SRC/scripts/diffconfig" "$OLD_LINUX_CONFIG" "$LINUX_OUT/.config"
+  grep -E 'CONFIG_(VIRTIO|VIRTIO_MMIO|VIRTIO_BLK|VIRTIO_NET|EXT4_FS|DEVTMPFS|DEVTMPFS_MOUNT|SERIAL_AMBA_PL011|SERIAL_AMBA_PL011_CONSOLE|DEBUG_INFO|GDB_SCRIPTS)=' "$LINUX_OUT/.config"
+else
+  printf 'Linux 配置迁移失败，请检查输出目录；未继续后续步骤。\n' >&2
+fi
 ```
 
-逐项审核所需内建配置；配置丢失时按第 7 节补回并复核。完整 `.config` 备份与精简 `configs/linux_defconfig` 用途不同。构建新版本并保存精简配置：
+若输出路径已存在，先备份其中数据再人工决定如何处理，绝不直接覆盖；迁移失败或被拒绝时不要执行后续构建块。逐项审核所需内建配置；配置丢失时按第 7 节补回并复核。完整 `.config` 备份与精简 `configs/linux_defconfig` 用途不同。构建新版本并保存精简配置：
 
 ```bash
 make -C "$LINUX_SRC" O="$LINUX_OUT" \
@@ -598,11 +611,17 @@ cp "$LINUX_OUT/defconfig" "$PROJECT_ROOT/configs/linux_defconfig"
 . ./env.sh
 OLD_UBOOT_VERSION="$UBOOT_VERSION"
 OLD_UBOOT_OUT="$UBOOT_OUT"
-cp "$OLD_UBOOT_OUT/.config" "$RUN_DIR/u-boot-${OLD_UBOOT_VERSION}-full.config"
-read -r -p '已发布的 U-Boot tag（例如 v202x.y）: ' NEW_UBOOT_VERSION
-if [[ -z "$NEW_UBOOT_VERSION" || "$NEW_UBOOT_VERSION" == "$OLD_UBOOT_VERSION" ]]; then
+OLD_UBOOT_CONFIG=""
+if ! OLD_UBOOT_CONFIG=$(mktemp "$RUN_DIR/u-boot-${OLD_UBOOT_VERSION}-full.config.XXXXXXXX"); then
+  printf '无法创建 U-Boot 配置备份，未执行 checkout。\n' >&2
+elif ! cp -- "$OLD_UBOOT_OUT/.config" "$OLD_UBOOT_CONFIG"; then
+  printf 'U-Boot 配置备份失败（保留 %s），未执行 checkout。\n' "$OLD_UBOOT_CONFIG" >&2
+elif ! read -r -p '已发布的 U-Boot tag（例如 v202x.y）: ' NEW_UBOOT_VERSION; then
+  printf '读取 tag 失败，未执行 checkout；备份：%s\n' "$OLD_UBOOT_CONFIG" >&2
+elif [[ -z "$NEW_UBOOT_VERSION" || "$NEW_UBOOT_VERSION" == "$OLD_UBOOT_VERSION" ]]; then
   printf 'tag 为空或与当前版本相同，停止升级。\n' >&2
 elif git -C "$UBOOT_SRC" ls-remote --exit-code --tags origin "refs/tags/$NEW_UBOOT_VERSION" >/dev/null; then
+  printf '配置备份：%s\n' "$OLD_UBOOT_CONFIG"
   git -C "$UBOOT_SRC" fetch --depth=1 origin tag "$NEW_UBOOT_VERSION" &&
     git -C "$UBOOT_SRC" switch --detach "$NEW_UBOOT_VERSION" &&
     git -C "$UBOOT_SRC" rev-parse HEAD
@@ -611,7 +630,7 @@ else
 fi
 ```
 
-仅在 tag 检查、fetch、checkout 都成功后继续。编辑 `env.sh`，将 `UBOOT_VERSION` 改成同一个 `$NEW_UBOOT_VERSION` 的实际值，重新加载并确认新输出路径：
+备份路径保存在 `OLD_UBOOT_CONFIG`（可用 `printf '%s\n' "$OLD_UBOOT_CONFIG"` 查看），被拒绝时也保留。仅在备份、tag 检查、fetch、checkout 都成功后继续。编辑 `env.sh`，将 `UBOOT_VERSION` 改成同一个 `$NEW_UBOOT_VERSION` 的实际值，重新加载并确认新输出路径：
 
 ```bash
 . ./env.sh
@@ -622,16 +641,24 @@ test "$UBOOT_OUT" != "$OLD_UBOOT_OUT"
 在 `out/u-boot-$NEW_UBOOT_VERSION` 新目录迁移配置：
 
 ```bash
-mkdir -p "$UBOOT_OUT"
-cp "$OLD_UBOOT_OUT/.config" "$UBOOT_OUT/.config"
-make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" listnewconfig
-make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+if [[ -e "$UBOOT_OUT" || -L "$UBOOT_OUT" ]]; then
+  printf '输出路径已存在，不覆盖：%s\n' "$UBOOT_OUT" >&2
+elif [[ ! -d "$(dirname -- "$UBOOT_OUT")" ]]; then
+  printf '输出父目录不存在：%s\n' "$UBOOT_OUT" >&2
+elif mkdir -- "$UBOOT_OUT" &&
+  cp -- "$OLD_UBOOT_CONFIG" "$UBOOT_OUT/.config" &&
+  make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" listnewconfig &&
+  make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" olddefconfig; then
+  printf 'U-Boot 配置迁移完成，请审核差异。\n'
+else
+  printf 'U-Boot 配置迁移失败，请检查输出目录；未继续后续步骤。\n' >&2
+fi
 ```
 
-审核新配置差异并构建，保存新的精简配置：
+若输出路径已存在，先备份其中数据再人工决定如何处理，绝不直接覆盖；迁移失败或被拒绝时不要执行后续构建块。审核新配置差异并构建，保存新的精简配置：
 
 ```bash
-diff -u "$OLD_UBOOT_OUT/.config" "$UBOOT_OUT/.config" || true
+diff -u "$OLD_UBOOT_CONFIG" "$UBOOT_OUT/.config" || true
 make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
   ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" -j"$JOBS"
 make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
@@ -643,21 +670,35 @@ cp "$UBOOT_OUT/defconfig" "$PROJECT_ROOT/configs/u-boot_defconfig"
 
 ### 12.3 使用保存的精简配置初始化新输出目录
 
-首次构建可分别使用本指南中的 `defconfig`。若要以仓库保存的精简配置初始化一个新的输出目录，使用 `mkdir -p`、复制到 `.config` 后运行 `olddefconfig`；不要反复对已有目录执行 `defconfig` 覆盖配置：
+首次构建可分别使用本指南中的 `defconfig`。若要以仓库保存的精简配置初始化新的输出目录，先修改 `env.sh` 使 `LINUX_OUT` 和 `UBOOT_OUT` 分别指向全新路径（基线输出通常已存在），确认父目录存在，再复制到 `.config` 后运行 `olddefconfig`；不要对已有目录覆盖配置：
 
-仅在确认输出目录全新且不存在用户文件时执行，`mkdir -p` 本身不能防止覆盖。已在本基线同版本实际验证以下复制精简配置方法，生成的两份完整配置分别与基线一致；跨版本时仍须审核差异与所需选项。
+仅在确认输出目录全新且不存在用户文件时执行；已有输出应先备份，再人工决定处理方式。已在本基线同版本实际验证以下复制精简配置方法，生成的两份完整配置分别与基线一致；跨版本时仍须审核差异与所需选项。
 
 ```bash
 . ./env.sh
-mkdir -p "$LINUX_OUT"
-cp "$PROJECT_ROOT/configs/linux_defconfig" "$LINUX_OUT/.config"
-make -C "$LINUX_SRC" O="$LINUX_OUT" \
-  ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+if [[ -e "$LINUX_OUT" || -L "$LINUX_OUT" ]]; then
+  printf 'Linux 输出路径已存在，不覆盖：%s\n' "$LINUX_OUT" >&2
+elif [[ ! -d "$(dirname -- "$LINUX_OUT")" ]]; then
+  printf 'Linux 输出父目录不存在：%s\n' "$LINUX_OUT" >&2
+elif mkdir -- "$LINUX_OUT" &&
+  cp -- "$PROJECT_ROOT/configs/linux_defconfig" "$LINUX_OUT/.config" &&
+  make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" olddefconfig; then
+  printf 'Linux 配置初始化完成。\n'
+else
+  printf 'Linux 配置初始化失败，请检查输出目录。\n' >&2
+fi
 
-mkdir -p "$UBOOT_OUT"
-cp "$PROJECT_ROOT/configs/u-boot_defconfig" "$UBOOT_OUT/.config"
-make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
-  ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+if [[ -e "$UBOOT_OUT" || -L "$UBOOT_OUT" ]]; then
+  printf 'U-Boot 输出路径已存在，不覆盖：%s\n' "$UBOOT_OUT" >&2
+elif [[ ! -d "$(dirname -- "$UBOOT_OUT")" ]]; then
+  printf 'U-Boot 输出父目录不存在：%s\n' "$UBOOT_OUT" >&2
+elif mkdir -- "$UBOOT_OUT" &&
+  cp -- "$PROJECT_ROOT/configs/u-boot_defconfig" "$UBOOT_OUT/.config" &&
+  make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" olddefconfig; then
+  printf 'U-Boot 配置初始化完成。\n'
+else
+  printf 'U-Boot 配置初始化失败，请检查输出目录。\n' >&2
+fi
 ```
 
 ### 12.4 回退、同版本增量构建与调试配置重建

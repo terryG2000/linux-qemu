@@ -73,6 +73,8 @@ make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" \
 - 已保存 `configs/linux_defconfig`；尚未验证 QEMU 启动或 GDB 断点。
 # 第 12 章：同版本配置与增量构建验证
 
+后续文档复审发现潜在覆盖风险：旧迁移示例会覆盖已存在的新版本输出 `.config`，固定备份名也可能覆盖先前备份；这不是实测数据丢失事件。现改为检查目标及父目录、仅创建全新目录，备份使用 `mktemp` 唯一路径且失败时不 checkout。验证时从指南提取 shell 块，全部 43 个 `bash` 块通过 `bash -n`；在 `/tmp/opencode` 独立目录模拟已存在 Linux/U-Boot 输出和固定名备份，运行迁移及初始化条件块，确认 `.config` 不变且 mock make 未调用；运行备份逻辑并输入空 tag，确认原备份不变且分别创建新的唯一备份。该 mock 不代替实际跨版本迁移验收。
+
 本次 Linux v6.18.60、U-Boot v2026.10 已是核验时官方最新已发布稳定基线，没有虚构新版本，也没有切换源码或修改 env.sh；以下不是跨版本升级或实际回退验收。
 
 先确认 `out/ch12-linux-config-test` 和 `out/ch12-uboot-config-test` 均不存在，再创建目录，分别将 `configs/linux_defconfig`、`configs/u-boot_defconfig` 复制为其中的 `.config`，执行：
