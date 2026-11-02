@@ -254,6 +254,8 @@ ls -lh "$UBOOT_OUT/u-boot.bin" "$UBOOT_OUT/u-boot"
 
 `u-boot.bin` 是启动用原始镜像，`u-boot` 是 ELF 符号文件。调试时不要把 `.bin` 当成带符号的 ELF。
 
+本仓库第 6 章实测完成编译和 ELF/配置检查；宿主机缺少 GnuTLS 开发文件时的无 sudo 增量构建方法及具体验收见 [构建排查记录](qemu-build-troubleshooting.md)。这不代表 QEMU 启动已验证。
+
 ## 7. 配置并构建 Linux
 
 先由上游 ARM64 默认配置开始，再显式确保虚拟机启动和调试所需驱动内建（`=y`，不是模块）。不启用模块可避免当前教学流程还需安装匹配模块。配置文件位于独立的 `LINUX_OUT`，不会污染源码树。
