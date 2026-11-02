@@ -525,6 +525,8 @@ gdb-multiarch -iex 'add-auto-load-safe-path /绝对路径/linux-qemu/src/linux' 
 
 ## 12. 独立更新 Linux 或 U-Boot（重要）
 
+本仓库第 12 章仅验证了同版本精简配置重建、基线增量构建、启动及版本选择拒绝分支；官方没有比当前基线更新的已发布稳定版本可供实测，因此没有完成跨版本升级或实际回退。详见[构建排查记录](qemu-build-troubleshooting.md)。
+
 版本变量、源码目录与按版本命名的输出目录已分离。一次只更新 Linux 或 U-Boot 中的一个，旧输出保留，便于 A/B 比较和回退。开始前分别检查仓库状态：
 
 ```bash
@@ -629,8 +631,7 @@ make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" oldd
 审核新配置差异并构建，保存新的精简配置：
 
 ```bash
-"$UBOOT_SRC/scripts/diffconfig" \
-  "$OLD_UBOOT_OUT/.config" "$UBOOT_OUT/.config"
+diff -u "$OLD_UBOOT_OUT/.config" "$UBOOT_OUT/.config" || true
 make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
   ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" -j"$JOBS"
 make -C "$UBOOT_SRC" O="$UBOOT_OUT" \
@@ -643,6 +644,8 @@ cp "$UBOOT_OUT/defconfig" "$PROJECT_ROOT/configs/u-boot_defconfig"
 ### 12.3 使用保存的精简配置初始化新输出目录
 
 首次构建可分别使用本指南中的 `defconfig`。若要以仓库保存的精简配置初始化一个新的输出目录，使用 `mkdir -p`、复制到 `.config` 后运行 `olddefconfig`；不要反复对已有目录执行 `defconfig` 覆盖配置：
+
+仅在确认输出目录全新且不存在用户文件时执行，`mkdir -p` 本身不能防止覆盖。已在本基线同版本实际验证以下复制精简配置方法，生成的两份完整配置分别与基线一致；跨版本时仍须审核差异与所需选项。
 
 ```bash
 . ./env.sh

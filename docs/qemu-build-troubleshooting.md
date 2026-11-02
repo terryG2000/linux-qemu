@@ -71,3 +71,32 @@ make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" \
 - 已逐项检查 virtio、virtio-mmio、virtio-blk、virtio-net、ext4、devtmpfs 和 PL011 串口为内建，模块禁用；调试符号和 GDB 脚本已启用。
 - ARM64 `Image` 约 76 MiB；`vmlinux` 是包含 debug_info 且未剥离的 AArch64 ELF；`vmlinux-gdb.py` 与 `defconfig` 已生成。
 - 已保存 `configs/linux_defconfig`；尚未验证 QEMU 启动或 GDB 断点。
+# 第 12 章：同版本配置与增量构建验证
+
+本次 Linux v6.18.60、U-Boot v2026.10 已是核验时官方最新已发布稳定基线，没有虚构新版本，也没有切换源码或修改 env.sh；以下不是跨版本升级或实际回退验收。
+
+先确认 `out/ch12-linux-config-test` 和 `out/ch12-uboot-config-test` 均不存在，再创建目录，分别将 `configs/linux_defconfig`、`configs/u-boot_defconfig` 复制为其中的 `.config`，执行：
+
+```bash
+make -C "$LINUX_SRC" O="$PROJECT_ROOT/out/ch12-linux-config-test" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+make -C "$UBOOT_SRC" O="$PROJECT_ROOT/out/ch12-uboot-config-test" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+"$LINUX_SRC/scripts/diffconfig" "$LINUX_OUT/.config" "$PROJECT_ROOT/out/ch12-linux-config-test/.config"
+diff -u "$UBOOT_OUT/.config" "$PROJECT_ROOT/out/ch12-uboot-config-test/.config"
+```
+
+两个配置差异均为空，说明这两个版本中将 savedefconfig 精简配置直接复制到 `.config` 再运行 `olddefconfig` 确实有效。Linux 逐项检查 ARM64、virtio、virtio-mmio、virtio-blk、virtio-net、ext4、devtmpfs、PL011 及其 console 均为 y，模块禁用，DEBUG_INFO、DWARF 默认、未压缩、GDB_SCRIPTS、FRAME_POINTER 为 y，reduced 和 zlib 禁用；zstd 未出现在生成配置中。U-Boot 的 ARM、ARM64、TARGET_QEMU_ARM_64BIT、TOOLS_MKEFICAPSULE 均为 y。未对隔离配置执行完整构建。
+
+实际发现 U-Boot v2026.10 没有 `scripts/diffconfig`，直接执行该路径报 `No such file or directory`；改用上述 `diff -u`，指南 12.2 已同步修正。
+
+基线执行同版本增量构建，使用原 Buildroot 工具链与第 6 章已准备的临时宿主 GnuTLS 路径：
+
+```bash
+make -C "$LINUX_SRC" O="$LINUX_OUT" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" -j2 Image vmlinux scripts_gdb
+make -C "$UBOOT_SRC" O="$UBOOT_OUT" ARCH=arm CROSS_COMPILE="$CROSS_COMPILE" \
+  HOSTCFLAGS='-I/tmp/opencode/uboot-host-deps/root/usr/include' \
+  HOSTLDFLAGS='-L/tmp/opencode/uboot-host-deps/root/usr/lib/x86_64-linux-gnu' -j2
+```
+
+均成功；Linux vmlinux 无需重建，U-Boot 更新了时间戳及部分对象并重新链接。为不覆盖已有 `out/run/virt.dtb`，将原启动脚本复制到 `/tmp/opencode/ch12-run/scripts/`，使用只指向原基线产物、运行目录位于 `/tmp/opencode/ch12-run/run` 的临时 env.sh，分别运行 linux 和 uboot 模式。两者均到 root shell、退出码为 0；Linux 模式观察到 `uname -r` 为 6.18.60 和 Power down，U-Boot 模式观察到 U-Boot 2026.10、Starting kernel 及 Linux 6.18.60 启动日志。日志位于 `/tmp/opencode/ch12-linux.log`、`/tmp/opencode/ch12-uboot.log`；U-Boot 模式的命令输出未完整捕获，不能据此声称捕获了关机日志。
+
+使用 `git ls-remote --exit-code --tags` 分别查询官方 Linux stable 和 U-Boot 远端的 `refs/tags/v6.18.60`、`refs/tags/v2026.10` 均成功；查询虚构的 `refs/tags/v0.0.0-nonexistent-ch12` 均返回 2。使用 shell mock 按指南判断逻辑测试空值、当前值和不存在值：前两种不调用 git，不存在值仅调用模拟 ls-remote 并拒绝，均未 fetch 或 checkout。该模拟不证明真实升级、构建新版本或回退成功；远端访问失败也会落入同一拒绝分支。
