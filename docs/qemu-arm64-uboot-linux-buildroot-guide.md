@@ -393,7 +393,7 @@ booti 0x48000000 - 0x4f000000
 
 ## 10. 日常启动脚本（可选）
 
-确认手动启动后，可在本地创建脚本统一参数。下方 heredoc 只是供你执行的命令；脚本不由本文自动写入仓库。
+确认手动启动后，可用仓库中的 `scripts/run-qemu.sh` 统一参数；以下 heredoc 也可用于重建脚本。
 
 ```bash
 . ./env.sh
@@ -435,7 +435,7 @@ else
     -drive "if=none,file=$BR_OUT/images/rootfs.ext4,format=raw,id=rootfs" \
     -device virtio-blk-device,drive=rootfs \
     -netdev user,id=net0 -device virtio-net-device,netdev=net0 \
-    -nographic
+    -nographic -snapshot
   test -s "$RUN_DIR/virt.dtb"
   qemu+=(-bios "$UBOOT_OUT/u-boot.bin"
     -device "loader,file=$LINUX_OUT/arch/arm64/boot/Image,addr=0x48000000,force-raw=on"
@@ -460,6 +460,8 @@ DEBUG=1 ./scripts/run-qemu.sh uboot
 ```
 
 `DEBUG=1` 只暂停正式 VM 并监听本机回环地址的 GDB 端口。调试时不要同时启动多个占用 `1234` 端口的实例。
+
+本仓库已实测两种脚本模式均 root 登录、`uname -r` 为 `6.18.60` 并正常关机；`DEBUG=1` 两种模式的回环端口均有 GDB stub 响应，uboot 模式先输出 DTB dumped 并退出生成进程，再暂停正式 VM。串口日志位于本机 `/tmp/opencode/ch10-linux.log` 和 `/tmp/opencode/ch10-uboot.log`，未提交。
 
 ## 11. GDB 调试
 
