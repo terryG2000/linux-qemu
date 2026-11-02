@@ -493,11 +493,13 @@ gdb-multiarch "$UBOOT_OUT/u-boot"
 ```gdb
 set architecture aarch64
 target remote :1234
+si
 hbreak _start
+monitor system_reset
 continue
 ```
 
-`_start` 断点命中后执行 `continue`，让 U-Boot 继续运行到串口提示符。在 QEMU 串口终端输入 `bdinfo`，记录 `relocaddr` 和 `reloc off`；不要先在 GDB Ctrl-C 暂停 guest，否则串口命令无法执行。记录完成后再切到 GDB 终端按 Ctrl-C 暂停目标，用 `help add-symbol-file` 核对当前 GDB 版本的语法，然后清除旧符号并添加重定位后的 ELF 符号：
+本组合初始暂停时 PC 已在 `_start`，直接设置断点并 `continue` 会跳过当前地址。先单步，再设置断点并通过 QEMU monitor 重置，才能实际命中；`system_reset` 会重置来宾状态，应仅在新建调试 VM 使用。`_start` 断点命中后执行 `delete 1`（若编号不是 1 则改成实际编号）及 `continue`，看到 autoboot 倒计时时在 QEMU 串口按任意键，让 U-Boot 运行到提示符。在串口输入 `bdinfo`，记录 `relocaddr` 和 `reloc off`；不要先在 GDB Ctrl-C 暂停 guest，否则串口命令无法执行。记录完成后再切到 GDB 终端按 Ctrl-C 暂停目标，用 `help add-symbol-file` 核对当前 GDB 版本的语法，然后清除旧符号并添加重定位后的 ELF 符号：
 
 ```gdb
 symbol-file
@@ -505,6 +507,8 @@ add-symbol-file /绝对路径/linux-qemu/out/u-boot-v2026.10/u-boot -o 0x实际r
 ```
 
 将绝对路径和偏移替换成实际值；`0x实际reloc-off` 是占位说明，不可原样输入。GDB 交互命令不会展开 shell 中的 `$UBOOT_OUT`，这里必须使用实际路径。偏移方式通常比仅指定 `.text` 地址更稳妥，但应依该版本 GDB 的帮助和 U-Boot 符号布局验证。不要使用 `u-boot.bin` 作为符号文件，也不要让 GDB 执行 `load` 覆盖 QEMU 已加载的镜像。
+
+可在 GDB 执行 `hbreak cmd_process`、`continue`，再在串口输入 `version`，验证重定位后断点；命中后继续运行或退出调试。实测直接 Linux 的 `hbreak start_kernel` 命中 `0xffff800083f608a4`；U-Boot 经上述单步和重置后命中 `_start`，`bdinfo` 给出 `relocaddr` 和 `reloc off` 均为 `0x7f48f000`，重载符号后 `cmd_process` 在 `0x7f4ca1a0` 命中。这些地址仅是本次构建及运行的结果，不能跨配置硬编码。曾尝试 `run_command`，输入 `version` 未命中，故这里改用实测成功的 `cmd_process`。日志在本机 `/tmp/opencode/ch11-linux-gdb.log`、`/tmp/opencode/ch11-uboot-interactive-gdb.log` 和 `/tmp/opencode/ch11-uboot-serial.log`，未提交。
 
 若 GDB 报 Python 脚本安全路径警告，只对可信的内核源码目录添加 safe-path，不要放开所有路径：
 
